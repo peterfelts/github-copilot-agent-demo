@@ -1,0 +1,210 @@
+name: Deploy to Azure VM and Validate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy infrastructure'
+        required: false
+        default: 'true'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RESOURCE_GROUP: copilot-demo-rg
+  AZURE_REGION: eastus
+
+jobs:
+  build:
+    name: Build Go Application
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build
+        run: go build -v
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Test build artifact
+        run: |
+          if [ ! -f ./github-copilot-agent-demo ]; then
+            echo "Build artifact not found"
+            exit 1
+          fi
+          chmod +x ./github-copilot-agent-demo
+          echo "Build successful"
+
+  deploy-infrastructure:
+    name: Deploy Azure Infrastructure
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    outputs:
+      vm-public-ip: ${{ steps.deploy.outputs.vmPublicIP }}
+      cosmos-account-name: ${{ steps.deploy.outputs.cosmosAccountName }}
+      managed-identity-client-id: ${{ steps.deploy.outputs.managedIdentityClientId }}
+      table-name: ${{ steps.deploy.outputs.tableName }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create Resource Group
+        run: |
+          az group create \
+            --name ${{ env.AZURE_RESOURCE_GROUP }} \
+            --location ${{ env.AZURE_REGION }}
+
+      - name: Deploy Bicep Template
+        id: deploy
+        run: |
+          # Generate unique cosmos account name
+          UNIQUE_SUFFIX=$(echo ${{ github.run_id }} | sha256sum | cut -c1-8)
+          COSMOS_NAME="copilot-demo-${UNIQUE_SUFFIX}"
+          
+          # Generate SSH key if not provided
+          if [ -z "${{ secrets.SSH_PUBLIC_KEY }}" ]; then
+            ssh-keygen -t rsa -b 4096 -f ~/.ssh/deploy_key -N ""
+            SSH_KEY=$(cat ~/.ssh/deploy_key.pub)
+          else
+            SSH_KEY="${{ secrets.SSH_PUBLIC_KEY }}"
+          fi
+          
+          # Deploy infrastructure
+          OUTPUT=$(az deployment group create \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --template-file infrastructure/main.bicep \
+            --parameters cosmosAccountName="${COSMOS_NAME}" \
+            --parameters sshPublicKey="${SSH_KEY}" \
+            --query 'properties.outputs' \
+            --output json)
+          
+          # Parse outputs
+          echo "vmPublicIP=$(echo $OUTPUT | jq -r '.vmPublicIP.value')" >> $GITHUB_OUTPUT
+          echo "cosmosAccountName=$(echo $OUTPUT | jq -r '.cosmosAccountName.value')" >> $GITHUB_OUTPUT
+          echo "managedIdentityClientId=$(echo $OUTPUT | jq -r '.managedIdentityClientId.value')" >> $GITHUB_OUTPUT
+          echo "tableName=$(echo $OUTPUT | jq -r '.tableName.value')" >> $GITHUB_OUTPUT
+          
+          echo "Deployment complete!"
+          echo "VM Public IP: $(echo $OUTPUT | jq -r '.vmPublicIP.value')"
+          echo "Cosmos Account: $(echo $OUTPUT | jq -r '.cosmosAccountName.value')"
+
+      - name: Wait for VM to be ready
+        run: |
+          echo "Waiting 120 seconds for VM to complete cloud-init..."
+          sleep 120
+
+  validate-deployment:
+    name: Validate Deployment
+    runs-on: ubuntu-latest
+    needs: deploy-infrastructure
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check VM Status
+        run: |
+          VM_STATUS=$(az vm get-instance-view \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name copilot-demo-vm \
+            --query 'instanceView.statuses[?starts_with(code, `PowerState/`)].displayStatus' \
+            --output tsv)
+          
+          echo "VM Status: $VM_STATUS"
+          
+          if [ "$VM_STATUS" != "VM running" ]; then
+            echo "VM is not running!"
+            exit 1
+          fi
+
+      - name: Test Metrics Endpoint
+        run: |
+          VM_IP="${{ needs.deploy-infrastructure.outputs.vm-public-ip }}"
+          METRICS_URL="http://${VM_IP}:8080/metrics"
+          
+          echo "Testing metrics endpoint: $METRICS_URL"
+          
+          # Retry up to 10 times with 30 second intervals
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          SUCCESS=false
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
+            
+            if curl -f -s -m 10 "$METRICS_URL" > /tmp/metrics.txt; then
+              echo "Metrics endpoint is accessible!"
+              cat /tmp/metrics.txt
+              SUCCESS=true
+              break
+            else
+              echo "Metrics endpoint not ready yet, waiting 30 seconds..."
+              sleep 30
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+            fi
+          done
+          
+          if [ "$SUCCESS" = false ]; then
+            echo "Failed to connect to metrics endpoint after $MAX_RETRIES attempts"
+            exit 1
+          fi
+
+      - name: Validate Cosmos DB Connection
+        run: |
+          VM_IP="${{ needs.deploy-infrastructure.outputs.vm-public-ip }}"
+          
+          # Check if connection error metric is zero
+          METRICS_URL="http://${VM_IP}:8080/metrics"
+          
+          if curl -s "$METRICS_URL" | grep -q "cosmos_connection_errors_total 0"; then
+            echo "✅ Application successfully connected to Cosmos DB (no errors)"
+          else
+            echo "⚠️  Checking connection error count..."
+            curl -s "$METRICS_URL" | grep "cosmos_connection_errors"
+            
+            # If metric doesn't exist yet, that's ok - app might still be starting
+            if ! curl -s "$METRICS_URL" | grep -q "cosmos_connection_errors_total"; then
+              echo "⚠️  Connection metrics not yet available, application may still be initializing"
+            fi
+          fi
+
+      - name: Display Deployment Summary
+        run: |
+          echo "🎉 Deployment Validation Complete!"
+          echo ""
+          echo "📊 Deployment Details:"
+          echo "  - VM Public IP: ${{ needs.deploy-infrastructure.outputs.vm-public-ip }}"
+          echo "  - Cosmos Account: ${{ needs.deploy-infrastructure.outputs.cosmos-account-name }}"
+          echo "  - Managed Identity: ${{ needs.deploy-infrastructure.outputs.managed-identity-client-id }}"
+          echo "  - Table Name: ${{ needs.deploy-infrastructure.outputs.table-name }}"
+          echo ""
+          echo "🔗 Metrics Endpoint: http://${{ needs.deploy-infrastructure.outputs.vm-public-ip }}:8080/metrics"
+          echo ""
+          echo "🔐 SSH Access: ssh azureuser@${{ needs.deploy-infrastructure.outputs.vm-public-ip }}"

@@ -1,0 +1,368 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "11896326365096988253"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "eastus",
+      "metadata": {
+        "description": "Azure region for resources"
+      }
+    },
+    "prefix": {
+      "type": "string",
+      "defaultValue": "copilot-demo",
+      "metadata": {
+        "description": "Prefix for resource names"
+      }
+    },
+    "cosmosAccountName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Cosmos DB account (must be globally unique)"
+      }
+    },
+    "tableName": {
+      "type": "string",
+      "defaultValue": "DemoTable",
+      "metadata": {
+        "description": "Name of the Cosmos DB table"
+      }
+    },
+    "vmSize": {
+      "type": "string",
+      "defaultValue": "Standard_B2s",
+      "metadata": {
+        "description": "Size of the virtual machine"
+      }
+    },
+    "adminUsername": {
+      "type": "string",
+      "defaultValue": "azureuser",
+      "metadata": {
+        "description": "Admin username for the VM"
+      }
+    },
+    "sshPublicKey": {
+      "type": "securestring",
+      "metadata": {
+        "description": "SSH public key for VM access"
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {
+        "Environment": "Demo",
+        "Project": "GitHub-Copilot-Agent-Demo"
+      },
+      "metadata": {
+        "description": "Tags to apply to all resources"
+      }
+    }
+  },
+  "variables": {
+    "$fxv#0": "#cloud-config\npackage_update: true\npackage_upgrade: true\n\npackages:\n  - git\n  - wget\n\nruncmd:\n  # Install Go\n  - wget -q https://go.dev/dl/go1.21.5.linux-amd64.tar.gz -O /tmp/go.tar.gz\n  - tar -C /usr/local -xzf /tmp/go.tar.gz\n  - rm /tmp/go.tar.gz\n  - echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh\n  - echo 'export GOPATH=/opt/go' >> /etc/profile.d/go.sh\n  \n  # Create app directory\n  - mkdir -p /opt/copilot-demo\n  - cd /opt/copilot-demo\n  \n  # Clone the repository\n  - git clone https://github.com/peterfelts/github-copilot-agent-demo.git /opt/copilot-demo\n  \n  # Build the application\n  - export PATH=$PATH:/usr/local/go/bin\n  - export GOPATH=/opt/go\n  - cd /opt/copilot-demo\n  - /usr/local/go/bin/go build -o github-copilot-agent-demo\n  \n  # Create systemd service\n  - |\n    cat > /etc/systemd/system/copilot-demo.service <<EOF\n    [Unit]\n    Description=GitHub Copilot Agent Demo Application\n    After=network.target\n\n    [Service]\n    Type=simple\n    User=root\n    WorkingDirectory=/opt/copilot-demo\n    EnvironmentFile=/etc/environment\n    ExecStart=/opt/copilot-demo/github-copilot-agent-demo\n    Restart=always\n    RestartSec=10\n\n    [Install]\n    WantedBy=multi-user.target\n    EOF\n  \n  # Enable and start the service (will start after environment is configured)\n  - systemctl daemon-reload\n  - systemctl enable copilot-demo.service\n  \n  # Wait for environment configuration from VM extension\n  - sleep 30\n  \n  # Start the service\n  - systemctl start copilot-demo.service\n\nwrite_files:\n  - path: /opt/copilot-demo/deploy.log\n    content: |\n      Deployment started\n    permissions: '0644'\n"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}-vnet', parameters('prefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.0.0.0/16"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[format('{0}-subnet', parameters('prefix'))]",
+            "properties": {
+              "addressPrefix": "10.0.1.0/24",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', parameters('prefix')))]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', parameters('prefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}-nsg', parameters('prefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "AllowMetrics",
+            "properties": {
+              "priority": 100,
+              "direction": "Inbound",
+              "access": "Allow",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "8080",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*"
+            }
+          },
+          {
+            "name": "AllowSSH",
+            "properties": {
+              "priority": 101,
+              "direction": "Inbound",
+              "access": "Allow",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "22",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}-pip', parameters('prefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static"
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}-nic', parameters('prefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "internal",
+            "properties": {
+              "subnet": {
+                "id": "[reference(resourceId('Microsoft.Network/virtualNetworks', format('{0}-vnet', parameters('prefix'))), '2023-05-01').subnets[0].id]"
+              },
+              "privateIPAllocationMethod": "Dynamic",
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', parameters('prefix')))]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', parameters('prefix')))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', format('{0}-vnet', parameters('prefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[format('{0}-identity', parameters('prefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts",
+      "apiVersion": "2023-04-15",
+      "name": "[parameters('cosmosAccountName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "kind": "GlobalDocumentDB",
+      "properties": {
+        "databaseAccountOfferType": "Standard",
+        "capabilities": [
+          {
+            "name": "EnableTable"
+          }
+        ],
+        "consistencyPolicy": {
+          "defaultConsistencyLevel": "Session"
+        },
+        "locations": [
+          {
+            "locationName": "[parameters('location')]",
+            "failoverPriority": 0,
+            "isZoneRedundant": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts/tables",
+      "apiVersion": "2023-04-15",
+      "name": "[format('{0}/{1}', parameters('cosmosAccountName'), parameters('tableName'))]",
+      "properties": {
+        "resource": {
+          "id": "[parameters('tableName')]"
+        },
+        "options": {
+          "throughput": 400
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.DocumentDB/databaseAccounts/{0}', parameters('cosmosAccountName'))]",
+      "name": "[guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), 'reader')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'fbdf93bf-df7d-467e-a4d2-9458aa1360c8')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.DocumentDB/databaseAccounts/{0}', parameters('cosmosAccountName'))]",
+      "name": "[guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), 'contributor')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '00000000-0000-0000-0000-000000000002')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2023-03-01",
+      "name": "[format('{0}-vm', parameters('prefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))))]": {}
+        }
+      },
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[parameters('vmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[format('{0}-vm', parameters('prefix'))]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "customData": "[base64(variables('$fxv#0'))]",
+          "linuxConfiguration": {
+            "disablePasswordAuthentication": true,
+            "ssh": {
+              "publicKeys": [
+                {
+                  "path": "[format('/home/{0}/.ssh/authorized_keys', parameters('adminUsername'))]",
+                  "keyData": "[parameters('sshPublicKey')]"
+                }
+              ]
+            }
+          }
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "0001-com-ubuntu-server-jammy",
+            "sku": "22_04-lts-gen2",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "Premium_LRS"
+            }
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', format('{0}-nic', parameters('prefix')))]"
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix')))]",
+        "[resourceId('Microsoft.Network/networkInterfaces', format('{0}-nic', parameters('prefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "apiVersion": "2023-03-01",
+      "name": "[format('{0}/{1}', format('{0}-vm', parameters('prefix')), 'configureApp')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "publisher": "Microsoft.Azure.Extensions",
+        "type": "CustomScript",
+        "typeHandlerVersion": "2.1",
+        "autoUpgradeMinorVersion": true,
+        "settings": {
+          "commandToExecute": "[format('echo \"MANAGED_IDENTITY_CLIENT_ID={0}\" >> /etc/environment && echo \"COSMOS_ACCOUNT_NAME={1}\" >> /etc/environment && echo \"TABLE_NAME={2}\" >> /etc/environment && echo \"METRICS_PORT=8080\" >> /etc/environment', reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').clientId, parameters('cosmosAccountName'), parameters('tableName'))]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix')))]",
+        "[resourceId('Microsoft.Compute/virtualMachines', format('{0}-vm', parameters('prefix')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "vmPublicIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', parameters('prefix'))), '2023-05-01').ipAddress]"
+    },
+    "vmName": {
+      "type": "string",
+      "value": "[format('{0}-vm', parameters('prefix'))]"
+    },
+    "cosmosAccountName": {
+      "type": "string",
+      "value": "[parameters('cosmosAccountName')]"
+    },
+    "cosmosEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), '2023-04-15').documentEndpoint]"
+    },
+    "managedIdentityClientId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').clientId]"
+    },
+    "tableName": {
+      "type": "string",
+      "value": "[parameters('tableName')]"
+    },
+    "metricsEndpoint": {
+      "type": "string",
+      "value": "[format('http://{0}:8080/metrics', reference(resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', parameters('prefix'))), '2023-05-01').ipAddress)]"
+    }
+  }
+}
