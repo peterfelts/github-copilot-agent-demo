@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cosmos-app
+  labels:
+    app: cosmos-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cosmos-app
+  template:
+    metadata:
+      labels:
+        app: cosmos-app
+        aadpodidbinding: cosmos-identity
+    spec:
+      containers:
+      - name: cosmos-app
+        image: <your-registry>/cosmos-app:latest
+        env:
+        - name: COSMOS_ACCOUNT_NAME
+          value: "<your-cosmos-account-name>"
+        - name: TABLE_NAME
+          value: "<your-table-name>"
+        - name: MANAGED_IDENTITY_CLIENT_ID
+          value: "<your-managed-identity-client-id>"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "250m"
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
