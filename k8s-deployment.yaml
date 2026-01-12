@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cosmos-app
+  labels:
+    app: cosmos-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cosmos-app
+  template:
+    metadata:
+      labels:
+        app: cosmos-app
+    spec:
+      containers:
+      - name: cosmos-app
+        image: <your-acr>.azurecr.io/cosmos-app:latest
+        ports:
+        - containerPort: 8080
+          name: metrics
+        env:
+        - name: COSMOS_ACCOUNT_NAME
+          value: "<your-cosmos-account-name>"
+        - name: COSMOS_TABLE_NAME
+          value: "<your-table-name>"
+        - name: MANAGED_IDENTITY_CLIENT_ID
+          value: "<your-managed-identity-client-id>"
+        - name: METRICS_PORT
+          value: "8080"
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cosmos-app-service
+spec:
+  selector:
+    app: cosmos-app
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+    name: metrics
+  type: ClusterIP
