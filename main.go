@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/aztables"
@@ -70,11 +74,36 @@ func main() {
 	// Test the connection by attempting to create the table if it doesn't exist
 	_, err = tableClient.CreateTable(ctx, nil)
 	if err != nil {
-		// Table might already exist, which is fine
-		// We'll log the error but not fail if it's a specific error
-		log.Printf("Table creation returned: %v (table may already exist)", err)
+		// Check if it's a "table already exists" error, which is acceptable
+		errMsg := err.Error()
+		if !strings.Contains(strings.ToLower(errMsg), "already exists") &&
+			!strings.Contains(strings.ToLower(errMsg), "tablebeingdeleted") {
+			// If it's not a "table exists" error, increment the metric and fail
+			cosmosConnectionErrors.Inc()
+			log.Fatalf("Failed to connect to Cosmos DB table: %v", err)
+		}
+		log.Printf("Table operation info: %v", err)
 	}
 
 	log.Printf("Successfully connected to Cosmos DB account: %s, table: %s", cosmosAccountName, tableName)
-	log.Println("Application running successfully")
+	
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	
+	// Run the application continuously
+	log.Println("Application running. Press Ctrl+C to stop...")
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			// Periodic health check
+			log.Println("Health check: Application is running")
+		case sig := <-sigChan:
+			log.Printf("Received signal %v, shutting down gracefully...", sig)
+			return
+		}
+	}
 }
