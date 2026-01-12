@@ -84,13 +84,14 @@ jobs:
           UNIQUE_SUFFIX=$(echo ${{ github.run_id }} | sha256sum | cut -c1-8)
           COSMOS_NAME="copilot-demo-${UNIQUE_SUFFIX}"
           
-          # Generate SSH key if not provided
+          # Check if SSH key is provided
           if [ -z "${{ secrets.SSH_PUBLIC_KEY }}" ]; then
-            ssh-keygen -t rsa -b 4096 -f ~/.ssh/deploy_key -N ""
-            SSH_KEY=$(cat ~/.ssh/deploy_key.pub)
-          else
-            SSH_KEY="${{ secrets.SSH_PUBLIC_KEY }}"
+            echo "Error: SSH_PUBLIC_KEY secret is required for deployment"
+            echo "Please configure the SSH_PUBLIC_KEY secret in your repository settings"
+            exit 1
           fi
+          
+          SSH_KEY="${{ secrets.SSH_PUBLIC_KEY }}"
           
           # Deploy infrastructure
           OUTPUT=$(az deployment group create \

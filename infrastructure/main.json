@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "11896326365096988253"
+      "templateHash": "1749990803878237195"
     }
   },
   "parameters": {
@@ -14,6 +14,20 @@
       "defaultValue": "eastus",
       "metadata": {
         "description": "Azure region for resources"
+      }
+    },
+    "repositoryUrl": {
+      "type": "string",
+      "defaultValue": "https://github.com/peterfelts/github-copilot-agent-demo.git",
+      "metadata": {
+        "description": "GitHub repository URL for the application"
+      }
+    },
+    "goVersion": {
+      "type": "string",
+      "defaultValue": "1.21.5",
+      "metadata": {
+        "description": "Go version to install"
       }
     },
     "prefix": {
@@ -68,7 +82,7 @@
     }
   },
   "variables": {
-    "$fxv#0": "#cloud-config\npackage_update: true\npackage_upgrade: true\n\npackages:\n  - git\n  - wget\n\nruncmd:\n  # Install Go\n  - wget -q https://go.dev/dl/go1.21.5.linux-amd64.tar.gz -O /tmp/go.tar.gz\n  - tar -C /usr/local -xzf /tmp/go.tar.gz\n  - rm /tmp/go.tar.gz\n  - echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh\n  - echo 'export GOPATH=/opt/go' >> /etc/profile.d/go.sh\n  \n  # Create app directory\n  - mkdir -p /opt/copilot-demo\n  - cd /opt/copilot-demo\n  \n  # Clone the repository\n  - git clone https://github.com/peterfelts/github-copilot-agent-demo.git /opt/copilot-demo\n  \n  # Build the application\n  - export PATH=$PATH:/usr/local/go/bin\n  - export GOPATH=/opt/go\n  - cd /opt/copilot-demo\n  - /usr/local/go/bin/go build -o github-copilot-agent-demo\n  \n  # Create systemd service\n  - |\n    cat > /etc/systemd/system/copilot-demo.service <<EOF\n    [Unit]\n    Description=GitHub Copilot Agent Demo Application\n    After=network.target\n\n    [Service]\n    Type=simple\n    User=root\n    WorkingDirectory=/opt/copilot-demo\n    EnvironmentFile=/etc/environment\n    ExecStart=/opt/copilot-demo/github-copilot-agent-demo\n    Restart=always\n    RestartSec=10\n\n    [Install]\n    WantedBy=multi-user.target\n    EOF\n  \n  # Enable and start the service (will start after environment is configured)\n  - systemctl daemon-reload\n  - systemctl enable copilot-demo.service\n  \n  # Wait for environment configuration from VM extension\n  - sleep 30\n  \n  # Start the service\n  - systemctl start copilot-demo.service\n\nwrite_files:\n  - path: /opt/copilot-demo/deploy.log\n    content: |\n      Deployment started\n    permissions: '0644'\n"
+    "$fxv#0": "#cloud-config\npackage_update: true\npackage_upgrade: true\n\npackages:\n  - git\n  - wget\n\nruncmd:\n  # Install Go (version from environment variable, defaults to 1.21.5)\n  - GO_VERSION=${GO_VERSION:-1.21.5}\n  - wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O /tmp/go.tar.gz\n  - tar -C /usr/local -xzf /tmp/go.tar.gz\n  - rm /tmp/go.tar.gz\n  - echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh\n  - echo 'export GOPATH=/opt/go' >> /etc/profile.d/go.sh\n  \n  # Create app directory\n  - mkdir -p /opt/copilot-demo\n  - cd /opt/copilot-demo\n  \n  # Clone the repository (repository URL from environment variable)\n  - REPO_URL=${REPOSITORY_URL:-https://github.com/peterfelts/github-copilot-agent-demo.git}\n  - git clone $REPO_URL /opt/copilot-demo\n  \n  # Build the application\n  - export PATH=$PATH:/usr/local/go/bin\n  - export GOPATH=/opt/go\n  - cd /opt/copilot-demo\n  - /usr/local/go/bin/go build -o github-copilot-agent-demo\n  \n  # Create systemd service\n  - |\n    cat > /etc/systemd/system/copilot-demo.service <<EOF\n    [Unit]\n    Description=GitHub Copilot Agent Demo Application\n    After=network.target\n\n    [Service]\n    Type=simple\n    User=root\n    WorkingDirectory=/opt/copilot-demo\n    EnvironmentFile=/etc/environment\n    ExecStart=/opt/copilot-demo/github-copilot-agent-demo\n    Restart=always\n    RestartSec=10\n\n    [Install]\n    WantedBy=multi-user.target\n    EOF\n  \n  # Enable and start the service (will start after environment is configured)\n  - systemctl daemon-reload\n  - systemctl enable copilot-demo.service\n  \n  # Wait for environment configuration from VM extension\n  - sleep 30\n  \n  # Start the service\n  - systemctl start copilot-demo.service\n\nwrite_files:\n  - path: /opt/copilot-demo/deploy.log\n    content: |\n      Deployment started\n    permissions: '0644'\n"
   },
   "resources": [
     {
@@ -246,7 +260,7 @@
       "scope": "[format('Microsoft.DocumentDB/databaseAccounts/{0}', parameters('cosmosAccountName'))]",
       "name": "[guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), 'contributor')]",
       "properties": {
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '00000000-0000-0000-0000-000000000002')]",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
         "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').principalId]",
         "principalType": "ServicePrincipal"
       },
@@ -325,7 +339,7 @@
         "typeHandlerVersion": "2.1",
         "autoUpgradeMinorVersion": true,
         "settings": {
-          "commandToExecute": "[format('echo \"MANAGED_IDENTITY_CLIENT_ID={0}\" >> /etc/environment && echo \"COSMOS_ACCOUNT_NAME={1}\" >> /etc/environment && echo \"TABLE_NAME={2}\" >> /etc/environment && echo \"METRICS_PORT=8080\" >> /etc/environment', reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').clientId, parameters('cosmosAccountName'), parameters('tableName'))]"
+          "commandToExecute": "[format('echo \"MANAGED_IDENTITY_CLIENT_ID={0}\" >> /etc/environment && echo \"COSMOS_ACCOUNT_NAME={1}\" >> /etc/environment && echo \"TABLE_NAME={2}\" >> /etc/environment && echo \"METRICS_PORT=8080\" >> /etc/environment && echo \"REPOSITORY_URL={3}\" >> /etc/environment && echo \"GO_VERSION={4}\" >> /etc/environment', reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').clientId, parameters('cosmosAccountName'), parameters('tableName'), parameters('repositoryUrl'), parameters('goVersion'))]"
         }
       },
       "dependsOn": [

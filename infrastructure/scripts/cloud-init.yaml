@@ -7,8 +7,9 @@ packages:
   - wget
 
 runcmd:
-  # Install Go
-  - wget -q https://go.dev/dl/go1.21.5.linux-amd64.tar.gz -O /tmp/go.tar.gz
+  # Install Go (version from environment variable, defaults to 1.21.5)
+  - GO_VERSION=${GO_VERSION:-1.21.5}
+  - wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O /tmp/go.tar.gz
   - tar -C /usr/local -xzf /tmp/go.tar.gz
   - rm /tmp/go.tar.gz
   - echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh
@@ -18,8 +19,9 @@ runcmd:
   - mkdir -p /opt/copilot-demo
   - cd /opt/copilot-demo
   
-  # Clone the repository
-  - git clone https://github.com/peterfelts/github-copilot-agent-demo.git /opt/copilot-demo
+  # Clone the repository (repository URL from environment variable)
+  - REPO_URL=${REPOSITORY_URL:-https://github.com/peterfelts/github-copilot-agent-demo.git}
+  - git clone $REPO_URL /opt/copilot-demo
   
   # Build the application
   - export PATH=$PATH:/usr/local/go/bin

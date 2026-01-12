@@ -136,14 +136,15 @@ After deployment, you can:
 
 Customize deployment by modifying parameters in `main.bicep`:
 
-- `resourceGroupName`: Name of the resource group
 - `location`: Azure region (default: eastus)
 - `prefix`: Prefix for resource names
 - `cosmosAccountName`: Cosmos DB account name (must be globally unique)
 - `tableName`: Name of the Cosmos DB table
 - `vmSize`: VM size (default: Standard_B2s)
 - `adminUsername`: Admin username for VM
-- `sshPublicKey`: SSH public key for authentication
+- `sshPublicKey`: SSH public key for authentication (format: ssh-rsa AAAAB3... user@host)
+- `repositoryUrl`: GitHub repository URL to clone (default: this repository)
+- `goVersion`: Go version to install (default: 1.21.5)
 
 ### Application Configuration
 

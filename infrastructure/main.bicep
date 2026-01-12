@@ -1,6 +1,12 @@
 @description('Azure region for resources')
 param location string = 'eastus'
 
+@description('GitHub repository URL for the application')
+param repositoryUrl string = 'https://github.com/peterfelts/github-copilot-agent-demo.git'
+
+@description('Go version to install')
+param goVersion string = '1.21.5'
+
 @description('Prefix for resource names')
 param prefix string = 'copilot-demo'
 
@@ -183,11 +189,12 @@ resource cosmosReaderRoleAssignment 'Microsoft.Authorization/roleAssignments@202
 }
 
 // Role Assignment - Cosmos DB Built-in Data Contributor
+// Note: This uses the preview Cosmos DB RBAC role for Table API access
 resource cosmosDataContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(cosmosAccount.id, identity.id, 'contributor')
   scope: cosmosAccount
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '00000000-0000-0000-0000-000000000002') // Cosmos DB Built-in Data Contributor
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor role for broader access
     principalId: identity.properties.principalId
     principalType: 'ServicePrincipal'
   }
@@ -259,7 +266,7 @@ resource vmExtension 'Microsoft.Compute/virtualMachines/extensions@2023-03-01' =
     typeHandlerVersion: '2.1'
     autoUpgradeMinorVersion: true
     settings: {
-      commandToExecute: 'echo "MANAGED_IDENTITY_CLIENT_ID=${identity.properties.clientId}" >> /etc/environment && echo "COSMOS_ACCOUNT_NAME=${cosmosAccount.name}" >> /etc/environment && echo "TABLE_NAME=${tableName}" >> /etc/environment && echo "METRICS_PORT=8080" >> /etc/environment'
+      commandToExecute: 'echo "MANAGED_IDENTITY_CLIENT_ID=${identity.properties.clientId}" >> /etc/environment && echo "COSMOS_ACCOUNT_NAME=${cosmosAccount.name}" >> /etc/environment && echo "TABLE_NAME=${tableName}" >> /etc/environment && echo "METRICS_PORT=8080" >> /etc/environment && echo "REPOSITORY_URL=${repositoryUrl}" >> /etc/environment && echo "GO_VERSION=${goVersion}" >> /etc/environment'
     }
   }
 }
