@@ -70,12 +70,12 @@ The repository includes a GitHub Actions workflow that:
 
 ### Required GitHub Secrets
 
-Configure the following secrets in your GitHub repository:
+Configure the following secrets in your GitHub repository (all are required):
 
-- `AZURE_CLIENT_ID`: Service principal client ID
-- `AZURE_TENANT_ID`: Azure tenant ID
-- `AZURE_SUBSCRIPTION_ID`: Azure subscription ID
-- `SSH_PUBLIC_KEY` (optional): SSH public key for VM access
+- `AZURE_CLIENT_ID`: Service principal client ID (required)
+- `AZURE_TENANT_ID`: Azure tenant ID (required)
+- `AZURE_SUBSCRIPTION_ID`: Azure subscription ID (required)
+- `SSH_PUBLIC_KEY`: SSH public key for VM access (required)
 
 ### Setting up Azure Service Principal
 

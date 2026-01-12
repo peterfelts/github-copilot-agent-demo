@@ -15,10 +15,6 @@ runcmd:
   - echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh
   - echo 'export GOPATH=/opt/go' >> /etc/profile.d/go.sh
   
-  # Create app directory
-  - mkdir -p /opt/copilot-demo
-  - cd /opt/copilot-demo
-  
   # Clone the repository (repository URL from environment variable)
   - REPO_URL=${REPOSITORY_URL:-https://github.com/peterfelts/github-copilot-agent-demo.git}
   - git clone $REPO_URL /opt/copilot-demo
