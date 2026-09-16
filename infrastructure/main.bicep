@@ -16,6 +16,10 @@ param cosmosAccountName string
 @description('Name of the Cosmos DB table')
 param tableName string = 'DemoTable'
 
+@minValue(1)
+@description('Number of user-assigned managed identities to deploy')
+param managedIdentityCount int = 10
+
 @description('Size of the virtual machine')
 param vmSize string = 'Standard_B2s'
 
@@ -130,12 +134,12 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-05-01' = {
   }
 }
 
-// User Assigned Managed Identity
-resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: '${prefix}-identity'
+// User Assigned Managed Identities
+resource identities 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = [for i in range(0, managedIdentityCount): {
+  name: '${prefix}-identity-${i + 1}'
   location: location
   tags: tags
-}
+}]
 
 // Cosmos DB Account
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2023-04-15' = {
@@ -178,27 +182,27 @@ resource cosmosTable 'Microsoft.DocumentDB/databaseAccounts/tables@2023-04-15' =
 }
 
 // Role Assignment - Cosmos DB Account Reader
-resource cosmosReaderRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(cosmosAccount.id, identity.id, 'reader')
+resource cosmosReaderRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in range(0, managedIdentityCount): {
+  name: guid(cosmosAccount.id, identities[i].id, 'reader')
   scope: cosmosAccount
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'fbdf93bf-df7d-467e-a4d2-9458aa1360c8') // Cosmos DB Account Reader Role
-    principalId: identity.properties.principalId
+    principalId: identities[i].properties.principalId
     principalType: 'ServicePrincipal'
   }
-}
+}]
 
 // Role Assignment - Cosmos DB Built-in Data Contributor
 // Note: This uses the preview Cosmos DB RBAC role for Table API access
-resource cosmosDataContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(cosmosAccount.id, identity.id, 'contributor')
+resource cosmosDataContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in range(0, managedIdentityCount): {
+  name: guid(cosmosAccount.id, identities[i].id, 'contributor')
   scope: cosmosAccount
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor role for broader access
-    principalId: identity.properties.principalId
+    principalId: identities[i].properties.principalId
     principalType: 'ServicePrincipal'
   }
-}
+}]
 
 // Virtual Machine
 resource vm 'Microsoft.Compute/virtualMachines@2023-03-01' = {
@@ -208,7 +212,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-03-01' = {
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
-      '${identity.id}': {}
+      for identity in identities: identity.id: {}
     }
   }
   properties: {
@@ -266,7 +270,7 @@ resource vmExtension 'Microsoft.Compute/virtualMachines/extensions@2023-03-01' =
     typeHandlerVersion: '2.1'
     autoUpgradeMinorVersion: true
     settings: {
-      commandToExecute: 'echo "MANAGED_IDENTITY_CLIENT_ID=${identity.properties.clientId}" >> /etc/environment && echo "COSMOS_ACCOUNT_NAME=${cosmosAccount.name}" >> /etc/environment && echo "TABLE_NAME=${tableName}" >> /etc/environment && echo "METRICS_PORT=8080" >> /etc/environment && echo "REPOSITORY_URL=${repositoryUrl}" >> /etc/environment && echo "GO_VERSION=${goVersion}" >> /etc/environment'
+      commandToExecute: 'echo "MANAGED_IDENTITY_CLIENT_IDS=${join([for identity in identities: identity.properties.clientId], ',')}" >> /etc/environment && echo "COSMOS_ACCOUNT_NAME=${cosmosAccount.name}" >> /etc/environment && echo "TABLE_NAME=${tableName}" >> /etc/environment && echo "METRICS_PORT=8080" >> /etc/environment && echo "REPOSITORY_URL=${repositoryUrl}" >> /etc/environment && echo "GO_VERSION=${goVersion}" >> /etc/environment'
     }
   }
 }
@@ -276,6 +280,7 @@ output vmPublicIP string = publicIP.properties.ipAddress
 output vmName string = vm.name
 output cosmosAccountName string = cosmosAccount.name
 output cosmosEndpoint string = cosmosAccount.properties.documentEndpoint
-output managedIdentityClientId string = identity.properties.clientId
+output managedIdentityClientIds array = [for identity in identities: identity.properties.clientId]
+output managedIdentityCount int = managedIdentityCount
 output tableName string = tableName
 output metricsEndpoint string = 'http://${publicIP.properties.ipAddress}:8080/metrics'

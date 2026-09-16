@@ -4,7 +4,7 @@ A repository used to demo Github Copilot Agent
 # Goal
 The goal of this project is to demonstrate how Github Copilot Agent can be used to implement entire projects/features, instead of simply helping with auto-complete suggestions.
 
-This project will consist of a Go application that Connects to a Cosmos DB account on Azure, using a User-Assigned Managed Service Identity to authenticate.
+This project will consist of a Go application that connects to a Cosmos DB account on Azure using multiple User-Assigned Managed Service Identities to authenticate.
 
 # Requirements
 - Go application
@@ -20,7 +20,7 @@ This project will consist of a Go application that Connects to a Cosmos DB accou
 # Implementation
 The application has been implemented with the following features:
 - Connects to Azure Cosmos DB Table API using the AzTables SDK
-- Authenticates using Managed Service Identity (both User-Assigned and System-Assigned)
+- Authenticates using multiple User-Assigned Managed Identities
 - Exposes Prometheus metrics at `/metrics` endpoint
 - Tracks connection errors via `cosmos_connection_errors_total` counter
 - Configurable via environment variables
@@ -36,14 +36,14 @@ go build
 The application requires the following environment variables:
 
 - `COSMOS_ACCOUNT_NAME` (required): Name of your Cosmos DB account
-- `MANAGED_IDENTITY_CLIENT_ID` (optional): Client ID for User-Assigned Managed Identity. If not set, System-Assigned Managed Identity is used
+- `MANAGED_IDENTITY_CLIENT_IDS` (required): Comma-separated client IDs for User-Assigned Managed Identities
 - `TABLE_NAME` (optional): Name of the table to connect to. Defaults to "DefaultTable"
 - `METRICS_PORT` (optional): Port for Prometheus metrics endpoint. Defaults to "8080"
 
 Example:
 ```bash
 export COSMOS_ACCOUNT_NAME=mycosmosaccount
-export MANAGED_IDENTITY_CLIENT_ID=12345678-1234-1234-1234-123456789abc
+export MANAGED_IDENTITY_CLIENT_IDS=12345678-1234-1234-1234-123456789abc,87654321-4321-4321-4321-cba987654321
 export TABLE_NAME=mytable
 export METRICS_PORT=8080
 ./github-copilot-agent-demo
@@ -101,7 +101,7 @@ az deployment group create \
 The deployment creates:
 - Azure Virtual Machine (Ubuntu 22.04)
 - Cosmos DB with Table API
-- User-Assigned Managed Identity
+- Configurable number of User-Assigned Managed Identities (default: 10)
 - Virtual Network and NSG
 - Public IP for external access
 

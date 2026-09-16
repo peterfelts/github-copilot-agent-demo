@@ -5,6 +5,9 @@
     "cosmosAccountName": {
       "value": "copilot-demo-cosmos-${uniqueString(resourceGroup().id)}"
     },
+    "managedIdentityCount": {
+      "value": 10
+    },
     "sshPublicKey": {
       "value": "ssh-rsa AAAAB3NzaC1yc2EAAAA... user@host (REPLACE WITH YOUR SSH PUBLIC KEY)"
     }

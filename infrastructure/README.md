@@ -8,7 +8,7 @@ The infrastructure includes:
 
 - **Azure Virtual Machine**: Ubuntu 22.04 LTS running the Go application
 - **Cosmos DB**: Table API enabled for data storage
-- **User-Assigned Managed Identity**: For secure authentication to Cosmos DB
+- **User-Assigned Managed Identities**: Configurable identities for secure authentication to Cosmos DB
 - **Virtual Network**: Isolated network with subnet
 - **Network Security Group**: Allows SSH (22) and metrics endpoint (8080)
 - **Public IP**: For external access to the VM
@@ -46,6 +46,7 @@ COSMOS_NAME="copilot-demo-${UNIQUE_SUFFIX}"
 az deployment group create \
   --resource-group copilot-demo-rg \
   --template-file main.bicep \
+  --parameters managedIdentityCount=10 \
   --parameters cosmosAccountName="${COSMOS_NAME}" \
   --parameters sshPublicKey="$(cat ~/.ssh/id_rsa.pub)"
 ```
@@ -140,6 +141,7 @@ Customize deployment by modifying parameters in `main.bicep`:
 - `prefix`: Prefix for resource names
 - `cosmosAccountName`: Cosmos DB account name (must be globally unique)
 - `tableName`: Name of the Cosmos DB table
+- `managedIdentityCount`: Number of user-assigned managed identities to deploy (default: 10)
 - `vmSize`: VM size (default: Standard_B2s)
 - `adminUsername`: Admin username for VM
 - `sshPublicKey`: SSH public key for authentication (format: ssh-rsa AAAAB3... user@host)
@@ -150,7 +152,7 @@ Customize deployment by modifying parameters in `main.bicep`:
 
 The application is configured via environment variables set in `/etc/environment`:
 
-- `MANAGED_IDENTITY_CLIENT_ID`: Automatically set from deployed identity
+- `MANAGED_IDENTITY_CLIENT_IDS`: Automatically set to a comma-separated list of deployed identity client IDs
 - `COSMOS_ACCOUNT_NAME`: Automatically set from deployed Cosmos DB
 - `TABLE_NAME`: Automatically set from parameters
 - `METRICS_PORT`: Set to 8080
@@ -193,7 +195,7 @@ sudo journalctl -u copilot-demo.service -n 50
 │  │                                                    │ │
 │  │  ┌──────────────┐      ┌─────────────────────┐   │ │
 │  │  │   Virtual    │      │  User-Assigned      │   │ │
-│  │  │   Machine    │─────▶│  Managed Identity   │   │ │
+│  │  │   Machine    │─────▶│ Managed Identities  │   │ │
 │  │  │  (Ubuntu)    │      └─────────────────────┘   │ │
 │  │  │              │               │                 │ │
 │  │  │ Go App:8080  │               │ Authenticates   │ │

@@ -58,7 +58,8 @@ jobs:
     outputs:
       vm-public-ip: ${{ steps.deploy.outputs.vmPublicIP }}
       cosmos-account-name: ${{ steps.deploy.outputs.cosmosAccountName }}
-      managed-identity-client-id: ${{ steps.deploy.outputs.managedIdentityClientId }}
+      managed-identity-client-ids: ${{ steps.deploy.outputs.managedIdentityClientIds }}
+      managed-identity-count: ${{ steps.deploy.outputs.managedIdentityCount }}
       table-name: ${{ steps.deploy.outputs.tableName }}
     steps:
       - name: Checkout code
@@ -105,7 +106,8 @@ jobs:
           # Parse outputs
           echo "vmPublicIP=$(echo $OUTPUT | jq -r '.vmPublicIP.value')" >> $GITHUB_OUTPUT
           echo "cosmosAccountName=$(echo $OUTPUT | jq -r '.cosmosAccountName.value')" >> $GITHUB_OUTPUT
-          echo "managedIdentityClientId=$(echo $OUTPUT | jq -r '.managedIdentityClientId.value')" >> $GITHUB_OUTPUT
+          echo "managedIdentityClientIds=$(echo $OUTPUT | jq -r '.managedIdentityClientIds.value | join(",")')" >> $GITHUB_OUTPUT
+          echo "managedIdentityCount=$(echo $OUTPUT | jq -r '.managedIdentityCount.value')" >> $GITHUB_OUTPUT
           echo "tableName=$(echo $OUTPUT | jq -r '.tableName.value')" >> $GITHUB_OUTPUT
           
           echo "Deployment complete!"
@@ -203,7 +205,8 @@ jobs:
           echo "📊 Deployment Details:"
           echo "  - VM Public IP: ${{ needs.deploy-infrastructure.outputs.vm-public-ip }}"
           echo "  - Cosmos Account: ${{ needs.deploy-infrastructure.outputs.cosmos-account-name }}"
-          echo "  - Managed Identity: ${{ needs.deploy-infrastructure.outputs.managed-identity-client-id }}"
+          echo "  - Managed Identity Count: ${{ needs.deploy-infrastructure.outputs.managed-identity-count }}"
+          echo "  - Managed Identities: ${{ needs.deploy-infrastructure.outputs.managed-identity-client-ids }}"
           echo "  - Table Name: ${{ needs.deploy-infrastructure.outputs.table-name }}"
           echo ""
           echo "🔗 Metrics Endpoint: http://${{ needs.deploy-infrastructure.outputs.vm-public-ip }}:8080/metrics"
