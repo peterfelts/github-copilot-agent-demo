@@ -1,0 +1,62 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+packages:
+  - git
+  - wget
+
+runcmd:
+  # Install Go (version from environment variable, defaults to 1.21.5)
+  - GO_VERSION=${GO_VERSION:-1.21.5}
+  - wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O /tmp/go.tar.gz
+  - tar -C /usr/local -xzf /tmp/go.tar.gz
+  - rm /tmp/go.tar.gz
+  - echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh
+  - echo 'export GOPATH=/opt/go' >> /etc/profile.d/go.sh
+  
+  # Clone the repository (repository URL from environment variable)
+  - REPO_URL=${REPOSITORY_URL:-https://github.com/peterfelts/github-copilot-agent-demo.git}
+  - git clone $REPO_URL /opt/copilot-demo
+  
+  # Build the application
+  - export PATH=$PATH:/usr/local/go/bin
+  - export GOPATH=/opt/go
+  - cd /opt/copilot-demo
+  - /usr/local/go/bin/go build -o github-copilot-agent-demo
+  
+  # Create systemd service
+  - |
+    cat > /etc/systemd/system/copilot-demo.service <<EOF
+    [Unit]
+    Description=GitHub Copilot Agent Demo Application
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=root
+    WorkingDirectory=/opt/copilot-demo
+    EnvironmentFile=/etc/environment
+    ExecStart=/opt/copilot-demo/github-copilot-agent-demo
+    Restart=always
+    RestartSec=10
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+  
+  # Enable and start the service (will start after environment is configured)
+  - systemctl daemon-reload
+  - systemctl enable copilot-demo.service
+  
+  # Wait for environment configuration from VM extension
+  - sleep 30
+  
+  # Start the service
+  - systemctl start copilot-demo.service
+
+write_files:
+  - path: /opt/copilot-demo/deploy.log
+    content: |
+      Deployment started
+    permissions: '0644'
