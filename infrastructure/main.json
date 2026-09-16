@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.39.26.7824",
-      "templateHash": "1749990803878237195"
+      "version": "0.46.1.21595",
+      "templateHash": "15994529286862907461"
     }
   },
   "parameters": {
@@ -50,6 +50,14 @@
         "description": "Name of the Cosmos DB table"
       }
     },
+    "managedIdentityCount": {
+      "type": "int",
+      "defaultValue": 10,
+      "minValue": 1,
+      "metadata": {
+        "description": "Number of user-assigned managed identities to deploy"
+      }
+    },
     "vmSize": {
       "type": "string",
       "defaultValue": "Standard_B2s",
@@ -82,7 +90,14 @@
     }
   },
   "variables": {
-    "$fxv#0": "#cloud-config\npackage_update: true\npackage_upgrade: true\n\npackages:\n  - git\n  - wget\n\nruncmd:\n  # Install Go (version from environment variable, defaults to 1.21.5)\n  - GO_VERSION=${GO_VERSION:-1.21.5}\n  - wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O /tmp/go.tar.gz\n  - tar -C /usr/local -xzf /tmp/go.tar.gz\n  - rm /tmp/go.tar.gz\n  - echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh\n  - echo 'export GOPATH=/opt/go' >> /etc/profile.d/go.sh\n  \n  # Create app directory\n  - mkdir -p /opt/copilot-demo\n  - cd /opt/copilot-demo\n  \n  # Clone the repository (repository URL from environment variable)\n  - REPO_URL=${REPOSITORY_URL:-https://github.com/peterfelts/github-copilot-agent-demo.git}\n  - git clone $REPO_URL /opt/copilot-demo\n  \n  # Build the application\n  - export PATH=$PATH:/usr/local/go/bin\n  - export GOPATH=/opt/go\n  - cd /opt/copilot-demo\n  - /usr/local/go/bin/go build -o github-copilot-agent-demo\n  \n  # Create systemd service\n  - |\n    cat > /etc/systemd/system/copilot-demo.service <<EOF\n    [Unit]\n    Description=GitHub Copilot Agent Demo Application\n    After=network.target\n\n    [Service]\n    Type=simple\n    User=root\n    WorkingDirectory=/opt/copilot-demo\n    EnvironmentFile=/etc/environment\n    ExecStart=/opt/copilot-demo/github-copilot-agent-demo\n    Restart=always\n    RestartSec=10\n\n    [Install]\n    WantedBy=multi-user.target\n    EOF\n  \n  # Enable and start the service (will start after environment is configured)\n  - systemctl daemon-reload\n  - systemctl enable copilot-demo.service\n  \n  # Wait for environment configuration from VM extension\n  - sleep 30\n  \n  # Start the service\n  - systemctl start copilot-demo.service\n\nwrite_files:\n  - path: /opt/copilot-demo/deploy.log\n    content: |\n      Deployment started\n    permissions: '0644'\n"
+    "copy": [
+      {
+        "name": "identityNames",
+        "count": "[length(range(0, parameters('managedIdentityCount')))]",
+        "input": "[format('{0}-identity-{1}', parameters('prefix'), add(range(0, parameters('managedIdentityCount'))[copyIndex('identityNames')], 1))]"
+      }
+    ],
+    "$fxv#0": "#cloud-config\npackage_update: true\npackage_upgrade: true\n\npackages:\n  - git\n  - wget\n\nruncmd:\n  # Install Go (version from environment variable, defaults to 1.21.5)\n  - GO_VERSION=${GO_VERSION:-1.21.5}\n  - wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O /tmp/go.tar.gz\n  - tar -C /usr/local -xzf /tmp/go.tar.gz\n  - rm /tmp/go.tar.gz\n  - echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh\n  - echo 'export GOPATH=/opt/go' >> /etc/profile.d/go.sh\n  \n  # Clone the repository (repository URL from environment variable)\n  - REPO_URL=${REPOSITORY_URL:-https://github.com/peterfelts/github-copilot-agent-demo.git}\n  - git clone $REPO_URL /opt/copilot-demo\n  \n  # Build the application\n  - export PATH=$PATH:/usr/local/go/bin\n  - export GOPATH=/opt/go\n  - cd /opt/copilot-demo\n  - /usr/local/go/bin/go build -o github-copilot-agent-demo\n  \n  # Create systemd service\n  - |\n    cat > /etc/systemd/system/copilot-demo.service <<EOF\n    [Unit]\n    Description=GitHub Copilot Agent Demo Application\n    After=network.target\n\n    [Service]\n    Type=simple\n    User=root\n    WorkingDirectory=/opt/copilot-demo\n    EnvironmentFile=/etc/environment\n    ExecStart=/opt/copilot-demo/github-copilot-agent-demo\n    Restart=always\n    RestartSec=10\n\n    [Install]\n    WantedBy=multi-user.target\n    EOF\n  \n  # Enable and start the service (will start after environment is configured)\n  - systemctl daemon-reload\n  - systemctl enable copilot-demo.service\n  \n  # Wait for environment configuration from VM extension\n  - sleep 30\n  \n  # Start the service\n  - systemctl start copilot-demo.service\n\nwrite_files:\n  - path: /opt/copilot-demo/deploy.log\n    content: |\n      Deployment started\n    permissions: '0644'\n"
   },
   "resources": [
     {
@@ -191,9 +206,13 @@
       ]
     },
     {
+      "copy": {
+        "name": "identities",
+        "count": "[length(range(0, parameters('managedIdentityCount')))]"
+      },
       "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
       "apiVersion": "2023-01-31",
-      "name": "[format('{0}-identity', parameters('prefix'))]",
+      "name": "[variables('identityNames')[range(0, parameters('managedIdentityCount'))[copyIndex()]]]",
       "location": "[parameters('location')]",
       "tags": "[parameters('tags')]"
     },
@@ -240,33 +259,43 @@
       ]
     },
     {
+      "copy": {
+        "name": "cosmosReaderRoleAssignment",
+        "count": "[length(range(0, parameters('managedIdentityCount')))]"
+      },
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "scope": "[format('Microsoft.DocumentDB/databaseAccounts/{0}', parameters('cosmosAccountName'))]",
-      "name": "[guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), 'reader')]",
+      "scope": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName'))]",
+      "name": "[guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityNames')[range(0, parameters('managedIdentityCount'))[range(0, parameters('managedIdentityCount'))[copyIndex()]]]), 'reader')]",
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'fbdf93bf-df7d-467e-a4d2-9458aa1360c8')]",
-        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').principalId]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityNames')[range(0, parameters('managedIdentityCount'))[range(0, parameters('managedIdentityCount'))[copyIndex()]]]), '2023-01-31').principalId]",
         "principalType": "ServicePrincipal"
       },
       "dependsOn": [
         "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName'))]",
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix')))]"
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityNames')[range(0, parameters('managedIdentityCount'))[range(0, parameters('managedIdentityCount'))[copyIndex()]]])]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityNames')[range(0, parameters('managedIdentityCount'))[range(0, parameters('managedIdentityCount'))[copyIndex()]]])]"
       ]
     },
     {
+      "copy": {
+        "name": "cosmosDataContributorRoleAssignment",
+        "count": "[length(range(0, parameters('managedIdentityCount')))]"
+      },
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "scope": "[format('Microsoft.DocumentDB/databaseAccounts/{0}', parameters('cosmosAccountName'))]",
-      "name": "[guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), 'contributor')]",
+      "scope": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName'))]",
+      "name": "[guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityNames')[range(0, parameters('managedIdentityCount'))[range(0, parameters('managedIdentityCount'))[copyIndex()]]]), 'contributor')]",
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
-        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').principalId]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityNames')[range(0, parameters('managedIdentityCount'))[range(0, parameters('managedIdentityCount'))[copyIndex()]]]), '2023-01-31').principalId]",
         "principalType": "ServicePrincipal"
       },
       "dependsOn": [
         "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName'))]",
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix')))]"
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityNames')[range(0, parameters('managedIdentityCount'))[range(0, parameters('managedIdentityCount'))[copyIndex()]]])]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityNames')[range(0, parameters('managedIdentityCount'))[range(0, parameters('managedIdentityCount'))[copyIndex()]]])]"
       ]
     },
     {
@@ -277,9 +306,7 @@
       "tags": "[parameters('tags')]",
       "identity": {
         "type": "UserAssigned",
-        "userAssignedIdentities": {
-          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))))]": {}
-        }
+        "userAssignedIdentities": "[toObject(variables('identityNames'), lambda('identityName', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', lambdaVariables('identityName'))), lambda('identityName', createObject()))]"
       },
       "properties": {
         "hardwareProfile": {
@@ -324,7 +351,6 @@
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix')))]",
         "[resourceId('Microsoft.Network/networkInterfaces', format('{0}-nic', parameters('prefix')))]"
       ]
     },
@@ -339,12 +365,11 @@
         "typeHandlerVersion": "2.1",
         "autoUpgradeMinorVersion": true,
         "settings": {
-          "commandToExecute": "[format('echo \"MANAGED_IDENTITY_CLIENT_ID={0}\" >> /etc/environment && echo \"COSMOS_ACCOUNT_NAME={1}\" >> /etc/environment && echo \"TABLE_NAME={2}\" >> /etc/environment && echo \"METRICS_PORT=8080\" >> /etc/environment && echo \"REPOSITORY_URL={3}\" >> /etc/environment && echo \"GO_VERSION={4}\" >> /etc/environment', reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').clientId, parameters('cosmosAccountName'), parameters('tableName'), parameters('repositoryUrl'), parameters('goVersion'))]"
+          "commandToExecute": "[format('IDENTITY_CLIENT_IDS=$(curl -s -H Metadata:true \"http://169.254.169.254/metadata/identity/info?api-version=2018-02-01\" | python3 -c ''import json,sys; data=json.load(sys.stdin); identities=data.get(\"userAssignedIdentities\", []); identities=identities.values() if isinstance(identities, dict) else identities; print(\",\".join(identity.get(\"clientId\", \"\") for identity in identities if identity.get(\"clientId\")))'' ) && echo \"MANAGED_IDENTITY_CLIENT_IDS=$IDENTITY_CLIENT_IDS\" >> /etc/environment && echo \"COSMOS_ACCOUNT_NAME={0}\" >> /etc/environment && echo \"TABLE_NAME={1}\" >> /etc/environment && echo \"METRICS_PORT=8080\" >> /etc/environment && echo \"REPOSITORY_URL={2}\" >> /etc/environment && echo \"GO_VERSION={3}\" >> /etc/environment', parameters('cosmosAccountName'), parameters('tableName'), parameters('repositoryUrl'), parameters('goVersion'))]"
         }
       },
       "dependsOn": [
         "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName'))]",
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix')))]",
         "[resourceId('Microsoft.Compute/virtualMachines', format('{0}-vm', parameters('prefix')))]"
       ]
     }
@@ -366,9 +391,16 @@
       "type": "string",
       "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), '2023-04-15').documentEndpoint]"
     },
-    "managedIdentityClientId": {
-      "type": "string",
-      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-identity', parameters('prefix'))), '2023-01-31').clientId]"
+    "managedIdentityClientIds": {
+      "type": "array",
+      "copy": {
+        "count": "[length(range(0, parameters('managedIdentityCount')))]",
+        "input": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityNames')[range(0, parameters('managedIdentityCount'))[range(0, parameters('managedIdentityCount'))[copyIndex()]]]), '2023-01-31').clientId]"
+      }
+    },
+    "managedIdentityCount": {
+      "type": "int",
+      "value": "[parameters('managedIdentityCount')]"
     },
     "tableName": {
       "type": "string",

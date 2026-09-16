@@ -36,6 +36,8 @@ param tags object = {
   Project: 'GitHub-Copilot-Agent-Demo'
 }
 
+var identityNames = [for i in range(0, managedIdentityCount): '${prefix}-identity-${i + 1}']
+
 // Virtual Network
 resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
   name: '${prefix}-vnet'
@@ -136,7 +138,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-05-01' = {
 
 // User Assigned Managed Identities
 resource identities 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = [for i in range(0, managedIdentityCount): {
-  name: '${prefix}-identity-${i + 1}'
+  name: identityNames[i]
   location: location
   tags: tags
 }]
@@ -211,9 +213,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-03-01' = {
   tags: tags
   identity: {
     type: 'UserAssigned'
-    userAssignedIdentities: {
-      for identity in identities: identity.id: {}
-    }
+    userAssignedIdentities: toObject(identityNames, identityName => resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', identityName), identityName => {})
   }
   properties: {
     hardwareProfile: {
@@ -270,7 +270,7 @@ resource vmExtension 'Microsoft.Compute/virtualMachines/extensions@2023-03-01' =
     typeHandlerVersion: '2.1'
     autoUpgradeMinorVersion: true
     settings: {
-      commandToExecute: 'echo "MANAGED_IDENTITY_CLIENT_IDS=${join([for identity in identities: identity.properties.clientId], ',')}" >> /etc/environment && echo "COSMOS_ACCOUNT_NAME=${cosmosAccount.name}" >> /etc/environment && echo "TABLE_NAME=${tableName}" >> /etc/environment && echo "METRICS_PORT=8080" >> /etc/environment && echo "REPOSITORY_URL=${repositoryUrl}" >> /etc/environment && echo "GO_VERSION=${goVersion}" >> /etc/environment'
+      commandToExecute: format('IDENTITY_CLIENT_IDS=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/identity/info?api-version=2018-02-01" | python3 -c \'import json,sys; data=json.load(sys.stdin); identities=data.get("userAssignedIdentities", []); identities=identities.values() if isinstance(identities, dict) else identities; print(",".join(identity.get("clientId", "") for identity in identities if identity.get("clientId")))\' ) && echo "MANAGED_IDENTITY_CLIENT_IDS=$IDENTITY_CLIENT_IDS" >> /etc/environment && echo "COSMOS_ACCOUNT_NAME={0}" >> /etc/environment && echo "TABLE_NAME={1}" >> /etc/environment && echo "METRICS_PORT=8080" >> /etc/environment && echo "REPOSITORY_URL={2}" >> /etc/environment && echo "GO_VERSION={3}" >> /etc/environment', cosmosAccount.name, tableName, repositoryUrl, goVersion)
     }
   }
 }
@@ -280,7 +280,7 @@ output vmPublicIP string = publicIP.properties.ipAddress
 output vmName string = vm.name
 output cosmosAccountName string = cosmosAccount.name
 output cosmosEndpoint string = cosmosAccount.properties.documentEndpoint
-output managedIdentityClientIds array = [for identity in identities: identity.properties.clientId]
+output managedIdentityClientIds array = [for i in range(0, managedIdentityCount): identities[i].properties.clientId]
 output managedIdentityCount int = managedIdentityCount
 output tableName string = tableName
 output metricsEndpoint string = 'http://${publicIP.properties.ipAddress}:8080/metrics'
